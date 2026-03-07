@@ -4,141 +4,74 @@ import pandas as pd
 import re
 from io import BytesIO
 from datetime import datetime
-import sqlite3
-import yfinance as yf
+import os
 
-DB_FILE = "silver_data.db"
+# Archivo CSV donde guardaremos el histórico
+CSV_FILE = "silver_oi.csv"
 
-
-# -------------------------------------------------
-# CREAR TABLA SI NO EXISTE
-# -------------------------------------------------
-
-def init_db():
-
-    conn = sqlite3.connect(DB_FILE)
-
-    conn.execute("""
-    CREATE TABLE IF NOT EXISTS silver_market_data (
-        date TEXT PRIMARY KEY,
-        price REAL,
-        volume INTEGER,
-        open_interest INTEGER
-    )
-    """)
-
-    conn.close()
-
-
-# -------------------------------------------------
-# EXTRAER OPEN INTEREST CME
-# -------------------------------------------------
-
-def get_cme_data():
-
+def get_silver_oi():
     url = "https://www.cmegroup.com/daily_bulletin/current/Section02B_Summary_Volume_And_Open_Interest_Metals_Futures_And_Options.pdf"
-
     headers = {"User-Agent": "Mozilla/5.0"}
 
     response = requests.get(url, headers=headers)
-
     if response.status_code != 200:
-        raise Exception("No se pudo descargar el PDF")
+        print("No se pudo descargar el PDF")
+        return None
 
     text = ""
-
     with pdfplumber.open(BytesIO(response.content)) as pdf:
         for page in pdf.pages:
             text += page.extract_text() + "\n"
 
     lines = text.split("\n")
-
     silver_line = None
-
     for line in lines:
         if "SI COMEX SILVER FUTURES" in line.upper():
             silver_line = line
             break
-
     if not silver_line:
-        raise Exception("No se encontró SI COMEX SILVER FUTURES")
+        print("No se encontró SI COMEX SILVER FUTURES")
+        return None
 
     numbers = re.findall(r"\d[\d,]*", silver_line)
+    if len(numbers) < 4:
+        print("Formato inesperado")
+        return None
 
-    volume = int(numbers[2].replace(",", ""))
+    overall_volume = int(numbers[2].replace(",", ""))
     open_interest = int(numbers[3].replace(",", ""))
 
+    # Fecha del reporte en el PDF
     datematch = re.search(r"[A-Za-z]+ \d{1,2}, \d{4}", text)
-
+    if not datematch:
+        print("No se encontró la fecha en el PDF")
+        return None
     report_date = datetime.strptime(datematch.group(), "%b %d, %Y").date()
 
-    return report_date, volume, open_interest
+    # Crear DataFrame de este día
+    df = pd.DataFrame({
+        "date": [report_date],
+        "volume": [overall_volume],
+        "open_interest": [open_interest]
+    })
 
+    return df
 
-# -------------------------------------------------
-# EXTRAER PRECIO
-# -------------------------------------------------
+def update_csv():
+    df_new = get_silver_oi()
+    if df_new is None:
+        return
 
-def get_price():
+    # Si no existe CSV, lo creamos con encabezados
+    if not os.path.exists(CSV_FILE):
+        df_new.to_csv(CSV_FILE, index=False)
+    else:
+        # Append sin duplicar fechas
+        df_existing = pd.read_csv(CSV_FILE)
+        if df_new["date"].iloc[0] not in df_existing["date"].values:
+            df_new.to_csv(CSV_FILE, mode="a", index=False, header=False)
 
-    data = yf.download(
-        "SI=F",
-        period="5d",
-        interval="1d",
-        progress=False,
-        auto_adjust=True
-    )
+    print(f"Datos guardados en {CSV_FILE}")
 
-    today = pd.Timestamp.today().normalize()
-
-    data = data[data.index < today]
-
-    price = data["Close"].iloc[-1].values[0]
-    price_date = data.index[-1].date()
-
-    return price_date, price
-
-
-# -------------------------------------------------
-# GUARDAR EN BASE DE DATOS
-# -------------------------------------------------
-
-def save_data(date, price, volume, open_interest):
-
-    conn = sqlite3.connect(DB_FILE)
-
-    conn.execute("""
-    INSERT OR REPLACE INTO silver_market_data
-    (date, price, volume, open_interest)
-    VALUES (?, ?, ?, ?)
-    """, (date, price, volume, open_interest))
-
-    conn.commit()
-    conn.close()
-
-
-# -------------------------------------------------
-# PIPELINE PRINCIPAL
-# -------------------------------------------------
-
-def run_pipeline():
-
-    init_db()
-
-    cme_date, volume, oi = get_cme_data()
-
-    price_date, price = get_price()
-
-    # usamos la fecha del CME (oficial)
-    save_data(cme_date, price, volume, oi)
-
-    print("Datos guardados:")
-    print(f"Fecha: {cme_date}")
-    print(f"Precio: {price}")
-    print(f"Volumen: {volume}")
-    print(f"Open Interest: {oi}")
-
-
-# -------------------------------------------------
-
-run_pipeline()
+if __name__ == "__main__":
+    update_csv()
