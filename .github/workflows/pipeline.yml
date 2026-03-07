@@ -1,25 +1,35 @@
 name: Silver Data Pipeline
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 23 * * *"
+    # Cron: viernes 23:00 UTC (ajusta tu horario)
+    - cron: "0 23 * * 5"
+  workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: 3.11
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas pdfplumber requests
 
-      - name: Run script
-        run: python Get_Silver_oi_vol.py
+      - name: Run pipeline
+        run: python silver_pipeline.py
+
+      - name: Commit CSV
+        run: |
+          git config --local user.email "you@example.com"
+          git config --local user.name "Your Name"
+          git add silver_oi.csv
+          git commit -m "Actualizar silver_oi.csv"
+          git push
+        continue-on-error: true   # Evita fallos si no hay cambios
