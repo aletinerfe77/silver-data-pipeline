@@ -22,4 +22,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run script
-        run: python Get_Silver_oi_&_vol.py
+        run: python Get_Silver_oi_vol.py
