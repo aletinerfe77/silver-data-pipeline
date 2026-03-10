@@ -68,6 +68,7 @@ def update_csv():
     else:
         # Append sin duplicar fechas
         df_existing = pd.read_csv(CSV_FILE)
+        df_existing["date"] = pd.to_datetime(df_existing["date"]).dt.date
         if df_new["date"].iloc[0] not in df_existing["date"].values:
             df_new.to_csv(CSV_FILE, mode="a", index=False, header=False)
 
